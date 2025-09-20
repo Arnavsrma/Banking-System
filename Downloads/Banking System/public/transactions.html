@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Transactions</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg1:#00c6ff; --bg2:#0072ff; --card:#fff; --muted:#6b7280; --accent:#0ea5e9; --danger:#ef4444; --success:#16a34a;
+      --radius:12px; --shadow:0 12px 36px rgba(2,6,23,0.12);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Roboto,Arial;background:linear-gradient(135deg,var(--bg1),var(--bg2));-webkit-font-smoothing:antialiased}
+    .wrap{max-width:1000px;margin:36px auto;padding:20px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.92));border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);border:1px solid rgba(255,255,255,0.6)}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:12px}
+    h2{margin:0;color:#062241}
+    .controls{display:flex;gap:10px;align-items:center}
+    .btn{padding:10px 14px;border-radius:10px;border:none;cursor:pointer;font-weight:600}
+    .btn.primary{background:linear-gradient(90deg,#06b6d4,#3b82f6);color:white}
+    .btn.ghost{background:transparent;border:1px solid rgba(10,10,10,0.06);color:#062241}
+    .balance{font-weight:700;color:#0b4b6f}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:12px;border-bottom:1px solid #edf2f7;text-align:left}
+    thead th{background:transparent;color:#0b3b57;font-weight:700}
+    tbody tr:hover{background:rgba(3,45,94,0.02)}
+    .type-deposit{color:var(--success);font-weight:700}
+    .type-withdraw{color:var(--danger);font-weight:700}
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.35);display:none;align-items:center;justify-content:center;z-index:20}
+    .modal{background:#fff;padding:18px;border-radius:10px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(2,6,23,0.2)}
+    .modal h3{margin:0 0 8px}
+    .field{margin:8px 0}
+    input[type="number"]{width:100%;padding:10px;border-radius:8px;border:1px solid #e6e9ef}
+    .muted{color:var(--muted);font-size:13px}
+    .footer{display:flex;justify-content:space-between;align-items:center;margin-top:12px}
+    .small{font-size:13px;color:var(--muted)}
+    @media (max-width:720px){.top{flex-direction:column;align-items:flex-start}table{font-size:14px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <div>
+          <h2>Transactions</h2>
+          <div class="small">View your deposit & withdrawal history</div>
+        </div>
+        <div class="controls">
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+            <div class="balance" id="bal">Balance: ₹0.00</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn ghost" id="homeBtn">Home</button>
+              <button class="btn ghost" id="logout">Logout</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-bottom:8px">
+        <button class="btn primary" id="depositBtn">Deposit</button>
+        <button class="btn primary" id="withdrawBtn">Withdraw</button>
+      </div>
+
+      <table aria-live="polite">
+        <thead>
+          <tr><th>Date</th><th>Type</th><th>Amount</th><th>Balance After</th><th>Note</th></tr>
+        </thead>
+        <tbody id="txBody">
+          <!-- rows inserted here -->
+        </tbody>
+      </table>
+
+      <div class="footer">
+        <div class="small">Transactions are stored securely.</div>
+        <div class="small">Last updated: <span id="lastUpdated">-</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h3 id="modalTitle">Action</h3>
+      <div class="muted">Available balance: <span id="avail">₹0.00</span></div>
+      <div class="field">
+        <label for="amountInput">Amount</label>
+        <input id="amountInput" type="number" min="0.01" step="0.01" />
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+        <button class="btn ghost" id="cancelBtn">Cancel</button>
+        <button class="btn primary" id="confirmBtn">Confirm</button>
+      </div>
+      <div class="muted" id="popMsg" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <script>
+    // token & auth
+    const token = localStorage.getItem('customer_token');
+    if (!token) { window.location.href = '/customer_login.html'; }
+
+    const txBody = document.getElementById('txBody');
+    const balEl = document.getElementById('bal');
+    const lastUpdated = document.getElementById('lastUpdated');
+    const overlay = document.getElementById('overlay');
+    const modalTitle = document.getElementById('modalTitle');
+    const avail = document.getElementById('avail');
+    const amountInput = document.getElementById('amountInput');
+    const popMsg = document.getElementById('popMsg');
+
+    let currentAction = null;
+
+    async function loadTransactions() {
+      const res = await fetch('/api/customer/transactions', { headers: { 'Authorization': 'Bearer ' + token }});
+      if (!res.ok) {
+        localStorage.removeItem('customer_token');
+        return window.location='/customer_login.html';
+      }
+      const data = await res.json();
+      balEl.textContent = 'Balance: ₹' + parseFloat(data.balance||0).toFixed(2);
+      avail.textContent = '₹' + parseFloat(data.balance||0).toFixed(2);
+      lastUpdated.textContent = new Date().toLocaleString();
+      txBody.innerHTML = '';
+      (data.transactions || []).forEach(tx => {
+        const tr = document.createElement('tr');
+        const typeClass = tx.type === 'deposit' ? 'type-deposit' : 'type-withdraw';
+        tr.innerHTML = `<td>${new Date(tx.created_at).toLocaleString()}</td>
+                        <td class="${typeClass}">${tx.type}</td>
+                        <td>₹${parseFloat(tx.amount).toFixed(2)}</td>
+                        <td>₹${parseFloat(tx.balance_after).toFixed(2)}</td>
+                        <td>${tx.note||''}</td>`;
+        txBody.appendChild(tr);
+      });
+    }
+
+    document.getElementById('depositBtn').addEventListener('click', () => openPopup('deposit'));
+    document.getElementById('withdrawBtn').addEventListener('click', () => openPopup('withdraw'));
+    document.getElementById('logout').addEventListener('click', () => { localStorage.removeItem('customer_token'); window.location='/customer_login.html'; });
+    document.getElementById('homeBtn').addEventListener('click', () => { window.location.href = '/index.html'; });
+
+    document.getElementById('cancelBtn').addEventListener('click', closePopup);
+
+    async function openPopup(action) {
+      currentAction = action;
+      modalTitle.textContent = action === 'deposit' ? 'Deposit' : 'Withdraw';
+      popMsg.textContent = '';
+      amountInput.value = '';
+      overlay.style.display = 'flex';
+      amountInput.focus();
+    }
+
+    function closePopup() { overlay.style.display = 'none'; }
+
+    document.getElementById('confirmBtn').addEventListener('click', async () => {
+      const amt = parseFloat(amountInput.value);
+      if (!amt || amt <= 0) { popMsg.textContent = 'Enter a valid amount'; return; }
+      const endpoint = currentAction === 'deposit' ? '/api/customer/deposit' : '/api/customer/withdraw';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amt })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        popMsg.textContent = data.error || data.message || 'Operation failed';
+        return;
+      }
+      closePopup();
+      await loadTransactions();
+    });
+
+    // initial load
+    loadTransactions();
+  </script>
+</body>
+</html>

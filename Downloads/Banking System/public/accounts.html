@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Banker Accounts</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg1:#00c6ff;--bg2:#0072ff;--card:#fff;--muted:#6b7280;--accent:#0ea5e9;--radius:12px;--shadow:0 12px 36px rgba(2,6,23,0.12)}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Roboto,Arial;background:linear-gradient(135deg,var(--bg1),var(--bg2));-webkit-font-smoothing:antialiased}
+    .wrap{max-width:1000px;margin:36px auto;padding:20px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.92));border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);border:1px solid rgba(255,255,255,0.6)}
+    .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    h2{margin:0;color:#062241}
+    .btn{padding:10px 14px;border-radius:10px;border:none;cursor:pointer;font-weight:600}
+    .btn.primary{background:linear-gradient(90deg,#06b6d4,#3b82f6);color:white}
+    .btn.ghost{background:transparent;border:1px solid rgba(10,10,10,0.06);color:#062241}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:12px;border-bottom:1px solid #edf2f7;text-align:left}
+    thead th{font-weight:700;color:#0b3b57}
+    tbody tr:hover{background:rgba(3,45,94,0.02)}
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.35);display:none;align-items:center;justify-content:center;z-index:20}
+    .overlay.active{display:flex}
+    .modal{background:#fff;padding:18px;border-radius:10px;max-width:720px;width:95%;box-shadow:0 20px 60px rgba(2,6,23,0.2)}
+    .modal table{margin-top:8px}
+    .small{font-size:13px;color:var(--muted)}
+    @media (max-width:720px){.top{flex-direction:column;align-items:flex-start}table{font-size:14px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <div>
+          <h2>Customer Accounts</h2>
+          <div class="small">List of customers and their balances</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn ghost" id="homeBtn">Home</button>
+          <button class="btn primary" id="logout">Logout</button>
+        </div>
+      </div>
+
+      <table aria-live="polite">
+        <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Balance</th><th>Action</th></tr></thead>
+        <tbody id="accountsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h3 id="modalTitle">Transactions</h3>
+      <div id="userInfo" class="small" style="margin-bottom:8px"></div>
+      <table>
+        <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Balance After</th></tr></thead>
+        <tbody id="txBody"></tbody>
+      </table>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px">
+        <button class="btn" id="closeModal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('banker_token');
+    if (!token) { window.location.href = '/banker_login.html'; }
+
+    const accountsBody = document.getElementById('accountsBody');
+    const overlay = document.getElementById('overlay');
+    const txBody = document.getElementById('txBody');
+    const userInfo = document.getElementById('userInfo');
+
+    async function loadAccounts() {
+      try {
+        const res = await fetch('/api/banker/accounts', { headers: { 'Authorization': 'Bearer ' + token }});
+        if (!res.ok) throw new Error('Unauthorized');
+        const data = await res.json();
+
+        accountsBody.innerHTML = '';
+        (data.accounts || []).forEach(a => {
+          const tr = document.createElement('tr');
+          const btn = document.createElement('button');
+          btn.className = 'btn';
+          btn.textContent = 'View';
+          btn.addEventListener('click', () => view(a.id, a.name || 'Unknown'));
+
+          tr.innerHTML = `<td>${a.id}</td><td>${a.name}</td><td>${a.email}</td><td>₹${parseFloat(a.balance||0).toFixed(2)}</td>`;
+          const td = document.createElement('td');
+          td.appendChild(btn);
+          tr.appendChild(td);
+
+          accountsBody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+        localStorage.removeItem('banker_token');
+        window.location='/banker_login.html';
+      }
+    }
+
+    async function view(userId, name) {
+      try {
+        const res = await fetch(`/api/banker/accounts/${userId}/transactions`, { headers: { 'Authorization': 'Bearer ' + token }});
+        if (!res.ok) throw new Error('Failed fetch');
+        const data = await res.json();
+
+        userInfo.textContent = `Customer: ${name} — Available balance: ₹${parseFloat(data.balance||0).toFixed(2)}`;
+        txBody.innerHTML = '';
+        (data.transactions || []).forEach(tx => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${new Date(tx.created_at).toLocaleString()}</td><td>${tx.type}</td><td>₹${parseFloat(tx.amount).toFixed(2)}</td><td>₹${parseFloat(tx.balance_after).toFixed(2)}</td>`;
+          txBody.appendChild(tr);
+        });
+        overlay.classList.add('active');
+      } catch (err) {
+        alert('Error loading transactions');
+      }
+    }
+
+    document.getElementById('closeModal').addEventListener('click', () => overlay.classList.remove('active'));
+    document.getElementById('logout').addEventListener('click', () => { localStorage.removeItem('banker_token'); window.location='/banker_login.html'; });
+    document.getElementById('homeBtn').addEventListener('click', () => { window.location.href = '/index.html'; });
+
+    loadAccounts();
+  </script>
+</body>
+</html>
